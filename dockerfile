@@ -1,34 +1,47 @@
-# Use official PHP image with Apache
-FROM php:8.2-apache
-
-# Install system dependencies and PHP extensions
-RUN apt-get update && apt-get install -y \
-    git zip unzip libpq-dev libzip-dev libonig-dev libxml2-dev \
-    && docker-php-ext-install pdo pdo_mysql mbstring zip exif pcntl bcmath
-
-# Enable Apache rewrite module
-RUN a2enmod rewrite
-
-# Copy app files
-COPY . /var/www/html
+# -------------------------------
+# Stage 1: Build Laravel App
+# -------------------------------
+FROM php:8.2-cli as build
 
 # Set working directory
 WORKDIR /var/www/html
 
+# Install system dependencies and PHP extensions
+RUN apt-get update && apt-get install -y \
+    git \
+    unzip \
+    libpng-dev \
+    libjpeg-dev \
+    libfreetype6-dev \
+    zip \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install gd pdo pdo_mysql
+
 # Install Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# Install Laravel dependencies
-RUN composer install --no-interaction --no-dev --optimize-autoloader
+# Copy project files
+COPY . .
 
-# Generate app key
+# Install dependencies
+RUN composer install --no-dev --optimize-autoloader
+
+# Generate application key
 RUN php artisan key:generate
 
-# Set proper permissions
-RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
+# -------------------------------
+# Stage 2: Production Runtime
+# -------------------------------
+FROM php:8.2-cli
 
-# Expose port 80
-EXPOSE 80
+# Set working directory
+WORKDIR /var/www/html
 
-# Start Apache
-CMD ["apache2-foreground"]
+# Copy built app from previous stage
+COPY --from=build /var/www/html /var/www/html
+
+# Expose port 8000 for PHP built-in server
+EXPOSE 8000
+
+# Run Laravel migrations and start the PHP server
+CMD php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8000
